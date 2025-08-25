@@ -9,8 +9,8 @@ from ta.trend import SMAIndicator
 import asyncio
 
 # ====== Конфигурация =======
-TELEGRAM_TOKEN = "ТОКЕН_ТУТ"
-TELEGRAM_USER_ID = 123456789   # твой id
+TELEGRAM_TOKEN = "8055499750:AAEdJ82x43ZbX3fnxK0lwHOkcu2Nn6v6sWs'""
+TELEGRAM_USER_ID = 7831076059   # твой id
 
 # Только пары, которые реально есть на Binance
 PAIRS = ["BTC/USDT", "ETH/USDT", "BNB/USDT"]
