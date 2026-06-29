@@ -1,19 +1,29 @@
 import { Client } from 'bedrock-protocol';
 
-// ===== НАСТРОЙКИ =====
 const config = {
     host: process.env.HOST || 'nur15pve-iweF.aternos.me',
     port: 33829,
     username: process.env.USERNAME || 'RealPlayer_228',
 };
 
-// ===== СОЗДАНИЕ КЛИЕНТА =====
-const client = new Client({
-    host: config.host,
-    port: config.port,
-    username: config.username,
-    offline: true
-});
+console.log('[START] Бот запущен!');
+console.log(`[CONFIG] Хост: ${config.host}:${config.port}`);
+console.log(`[CONFIG] Игрок: ${config.username}`);
+
+let client;
+
+try {
+    client = new Client({
+        host: config.host,
+        port: config.port,
+        username: config.username,
+        offline: true,
+        timeout: 10000
+    });
+} catch (err) {
+    console.log('[FATAL] Ошибка создания клиента:', err.message);
+    process.exit(1);
+}
 
 // ===== СОСТОЯНИЕ =====
 let lastAction = null;
@@ -101,8 +111,18 @@ client.on('close', () => {
 
 client.on('error', (err) => {
     console.log('[ERROR]', err.message);
+    // НЕ ВЫХОДИМ, ПЫТАЕМСЯ ПЕРЕПОДКЛЮЧИТЬСЯ
+    setTimeout(() => {
+        console.log('[RECONNECT] Попытка переподключения...');
+        client.connect();
+    }, 30000);
 });
 
-console.log('[START] Бот запущен!');
-console.log(`[CONFIG] Хост: ${config.host}:${config.port}`);
-console.log(`[CONFIG] Игрок: ${config.username}`);
+// ===== ЗАЩИТА ОТ КРАША =====
+process.on('uncaughtException', (err) => {
+    console.log('[CRASH]', err.message);
+    setTimeout(() => {
+        console.log('[RECONNECT] Перезапуск после краша...');
+        client.connect();
+    }, 30000);
+});
