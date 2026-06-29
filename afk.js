@@ -1,15 +1,28 @@
 import { Client } from 'bedrock-protocol';
+import http from 'http';
 
 // ===== НАСТРОЙКИ =====
 const config = {
     host: process.env.HOST || 'nur15pve-iweF.aternos.me',
-    port: 33829,
+    port: 33829, // ЖЁСТКИЙ ПОРТ ДЛЯ ATERNOS
     username: process.env.USERNAME || 'RealPlayer_228',
 };
 
 console.log('[START] Бот запущен!');
 console.log(`[CONFIG] Хост: ${config.host}:${config.port}`);
 console.log(`[CONFIG] Игрок: ${config.username}`);
+console.log('[INFO] Бот запущен, ожидаем подключения...');
+
+// ===== ФАКОВЫЙ ВЕБ-СЕРВЕР ДЛЯ RAILWAY =====
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end(`Bot is running!\nHost: ${config.host}:${config.port}\nPlayer: ${config.username}\n`);
+});
+
+const WEB_PORT = process.env.PORT || 8080;
+server.listen(WEB_PORT, '0.0.0.0', () => {
+    console.log(`[WEB] Фейковый сервер запущен на порту ${WEB_PORT}`);
+});
 
 // ===== СОЗДАНИЕ КЛИЕНТА =====
 let client;
@@ -28,7 +41,6 @@ function createClient() {
             timeout: 15000
         });
 
-        // ===== ОБРАБОТЧИКИ СОБЫТИЙ =====
         client.on('start', () => {
             isConnecting = false;
             console.log('[OK] Бот в игре!');
@@ -156,12 +168,7 @@ process.on('unhandledRejection', (err) => {
     }, 30000);
 });
 
-// ===== ДЕРЖИМ ПРОЦЕСС ЖИВЫМ =====
-setInterval(() => {
-    // Просто держим процесс активным
-}, 60000);
-
 // ===== ЗАПУСК =====
 createClient();
 
-console.log('[INFO] Бот запущен, ожидаем подключения...');
+console.log('[INFO] Бот полностью запущен, ожидаем события...');
