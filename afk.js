@@ -1,8 +1,9 @@
 import { Client } from 'bedrock-protocol';
 
+// ===== НАСТРОЙКИ =====
 const config = {
     host: process.env.HOST || 'nur15pve-iweF.aternos.me',
-    port: 33829,
+    port: parseInt(process.env.PORT) || 33829,
     username: process.env.USERNAME || 'RealPlayer_228',
 };
 
@@ -10,22 +11,61 @@ console.log('[START] Бот запущен!');
 console.log(`[CONFIG] Хост: ${config.host}:${config.port}`);
 console.log(`[CONFIG] Игрок: ${config.username}`);
 
+// ===== СОЗДАНИЕ КЛИЕНТА =====
 let client;
+let isConnecting = false;
 
-try {
-    client = new Client({
-        host: config.host,
-        port: config.port,
-        username: config.username,
-        offline: true,
-        timeout: 10000
-    });
-} catch (err) {
-    console.log('[FATAL] Ошибка создания клиента:', err.message);
-    process.exit(1);
+function createClient() {
+    if (isConnecting) return;
+    isConnecting = true;
+
+    try {
+        client = new Client({
+            host: config.host,
+            port: config.port,
+            username: config.username,
+            offline: true,
+            timeout: 15000
+        });
+
+        // ===== ОБРАБОТЧИКИ СОБЫТИЙ =====
+        client.on('start', () => {
+            isConnecting = false;
+            console.log('[OK] Бот в игре!');
+            setTimeout(startLoop, 5000 + Math.random() * 5000);
+        });
+
+        client.on('close', () => {
+            isConnecting = false;
+            console.log('[KICK] Кикнут или дисконнект');
+            const delay = 30000 + Math.random() * 60000;
+            console.log(`[RECONNECT] через ${(delay/1000).toFixed(0)} сек`);
+            setTimeout(() => {
+                console.log('[RECONNECT] Попытка подключения...');
+                createClient();
+            }, delay);
+        });
+
+        client.on('error', (err) => {
+            isConnecting = false;
+            console.log('[ERROR]', err.message);
+            setTimeout(() => {
+                console.log('[RECONNECT] Попытка переподключения...');
+                createClient();
+            }, 30000);
+        });
+
+    } catch (err) {
+        isConnecting = false;
+        console.log('[FATAL] Ошибка создания клиента:', err.message);
+        setTimeout(() => {
+            console.log('[RECONNECT] Перезапуск после фатальной ошибки...');
+            createClient();
+        }, 30000);
+    }
 }
 
-// ===== СОСТОЯНИЕ =====
+// ===== ДЕЙСТВИЯ =====
 let lastAction = null;
 const actions = ['move', 'jump', 'look'];
 
@@ -43,7 +83,11 @@ function getRandomAction() {
 }
 
 function performAction(action) {
-    if (!client.position) return;
+    if (!client || !client.position) {
+        console.log('[WARN] Клиент не готов, пропускаем действие');
+        return;
+    }
+    
     console.log(`[ACTION] ${action}`);
 
     switch(action) {
@@ -64,10 +108,12 @@ function performAction(action) {
                 on_ground: false
             });
             setTimeout(() => {
-                client.queue('move_player', {
-                    position: client.position,
-                    on_ground: true
-                });
+                if (client) {
+                    client.queue('move_player', {
+                        position: client.position,
+                        on_ground: true
+                    });
+                }
             }, 300);
             break;
         }
@@ -93,36 +139,29 @@ function startLoop() {
     }, delay);
 }
 
-// ===== СОБЫТИЯ =====
-client.on('start', () => {
-    console.log('[OK] Бот в игре!');
-    setTimeout(startLoop, 5000 + Math.random() * 5000);
-});
-
-client.on('close', () => {
-    console.log('[KICK] Кикнут или дисконнект');
-    const delay = 30000 + Math.random() * 60000;
-    console.log(`[RECONNECT] через ${(delay/1000).toFixed(0)} сек`);
-    setTimeout(() => {
-        console.log('[RECONNECT] Попытка подключения...');
-        client.connect();
-    }, delay);
-});
-
-client.on('error', (err) => {
-    console.log('[ERROR]', err.message);
-    // НЕ ВЫХОДИМ, ПЫТАЕМСЯ ПЕРЕПОДКЛЮЧИТЬСЯ
-    setTimeout(() => {
-        console.log('[RECONNECT] Попытка переподключения...');
-        client.connect();
-    }, 30000);
-});
-
 // ===== ЗАЩИТА ОТ КРАША =====
 process.on('uncaughtException', (err) => {
     console.log('[CRASH]', err.message);
     setTimeout(() => {
         console.log('[RECONNECT] Перезапуск после краша...');
-        client.connect();
+        createClient();
     }, 30000);
 });
+
+process.on('unhandledRejection', (err) => {
+    console.log('[REJECTION]', err.message || err);
+    setTimeout(() => {
+        console.log('[RECONNECT] Перезапуск после rejection...');
+        createClient();
+    }, 30000);
+});
+
+// ===== ДЕРЖИМ ПРОЦЕСС ЖИВЫМ =====
+setInterval(() => {
+    // Просто держим процесс активным
+}, 60000);
+
+// ===== ЗАПУСК =====
+createClient();
+
+console.log('[INFO] Бот запущен, ожидаем подключения...');
