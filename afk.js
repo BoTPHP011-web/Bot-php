@@ -3,7 +3,7 @@ import { Client } from 'bedrock-protocol';
 // ===== НАСТРОЙКИ =====
 const config = {
     host: process.env.HOST || 'nur15pve-iweF.aternos.me',
-    port: parseInt(process.env.PORT) || 19132,
+    port: 33829,
     username: process.env.USERNAME || 'RealPlayer_228',
 };
 
