@@ -11,7 +11,7 @@ const CONFIG = {
 };
 
 let bot = null;
-let isRunning = true; // Переключатель из веб-интерфейса
+let isRunning = true;
 let reconnectTimeout = null;
 
 // === ВЕБ ИНТЕРФЕЙС ===
