@@ -1,0 +1,15 @@
+{
+  "name": "mc-railway-bot",
+  "version": "1.0.0",
+  "description": "24/7 Minecraft Bot with Web Control",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "mineflayer": "^4.22.0",
+    "mineflayer-pathfinder": "^2.4.5",
+    "minecraft-data": "^3.72.0",
+    "express": "^4.19.2"
+  }
+}
