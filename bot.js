@@ -1,6 +1,4 @@
 const mineflayer = require('mineflayer');
-const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
-const GoalLookAtBlock = goals.GoalLookAtBlock;
 const express = require('express');
 
 const CONFIG = {
@@ -11,10 +9,14 @@ const CONFIG = {
 };
 
 let bot = null;
-let isRunning = true; // Переключатель из веб-интерфейса
+let isRunning = true; 
 let reconnectTimeout = null;
+let reconnectAttempts = 0;
 
-// === УЛУЧШЕНИЕ 6: ХРАНИЛИЩЕ ДЛЯ ЖИВЫХ ЛОГОВ ===
+// Статистика для красивого минутного отчета
+let stats = { stone: 0, wood: 0, jumps: 0, sneaks: 0, idleSecs: 0 };
+let statsInterval = null;
+
 const logsBuffer = [];
 const logClients = new Set();
 
@@ -22,24 +24,32 @@ function logToWeb(message) {
   const timestamp = new Date().toLocaleTimeString();
   const formattedLog = `[${timestamp}] ${message}`;
   
-  // Выводим в стандартную консоль Railway
   console.log(message);
   
-  // Сохраняем последние 50 логов в буфер
   logsBuffer.push(formattedLog);
   if (logsBuffer.length > 50) logsBuffer.shift();
   
-  // Отправляем всем подключенным веб-клиентам
   logClients.forEach(client => {
     client.write(`data: ${JSON.stringify({ log: formattedLog })}\n\n`);
   });
 }
 
+// Минутный отчет в веб-панель
+function startStatsReporter() {
+  if (statsInterval) clearInterval(statsInterval);
+  statsInterval = setInterval(() => {
+    if (bot && bot.entity) {
+      logToWeb(`📊 СВОДКА | Камня сломано: ${stats.stone} | Дерева: ${stats.wood} | Прыжков: ${stats.jumps} | Приседаний: ${stats.sneaks} | Отдыхал: ${stats.idleSecs} сек.`);
+      // Сбрасываем счетчики на следующую минуту
+      stats = { stone: 0, wood: 0, jumps: 0, sneaks: 0, idleSecs: 0 };
+    }
+  }, 60000);
+}
+
 // === ВЕБ ИНТЕРФЕЙС ===
 const app = express();
-const webPort = process.env.PORT || 8080; // Настроенный тобой порт 8080
+const webPort = process.env.PORT || 8080;
 
-// Парсинг данных из форм для Улучшения 2
 app.use(express.urlencoded({ extended: true }));
 
 app.get('/', (req, res) => {
@@ -73,12 +83,10 @@ app.get('/', (req, res) => {
           
           <button class="btn-on" onclick="location.href='/start'">ВКЛЮЧИТЬ</button>
           <button class="btn-off" onclick="location.href='/stop'">ОТКЛЮЧИТЬ</button>
-          <!-- УЛУЧШЕНИЕ 5: КНОПКА ЭКСТРЕННОГО РЕКОННЕКТА -->
           <button class="btn-reconnect" onclick="location.href='/reconnect'">ПЕРЕПОДКЛЮЧИТЬ</button>
           
           <hr style="border-color: #444;"/>
           
-          <!-- УЛУЧШЕНИЕ 2: ИЗМЕНЕНИЕ НАСТРОЕК НА ЛЕТУ -->
           <h3>Настройки подключения (Aternos)</h3>
           <form action="/update-config" method="POST">
             <div class="form-group">
@@ -97,18 +105,15 @@ app.get('/', (req, res) => {
           </form>
         </div>
 
-        <!-- УЛУЧШЕНИЕ 6: ЖИВОЙ ЛОГ КОНСОЛИ -->
         <div class="logs-container">
           <h3>Консоль бота (В реальном времени)</h3>
           <div id="logBox">${logsBuffer.join('\n')}</div>
         </div>
 
         <script>
-          // Скролл логов вниз при загрузке страницы
           const logBox = document.getElementById('logBox');
           logBox.scrollTop = logBox.scrollHeight;
 
-          // Подключение к потоку живых логов (SSE)
           const eventSource = new EventSource('/stream-logs');
           eventSource.onmessage = function(event) {
             const data = JSON.parse(event.data);
@@ -137,42 +142,32 @@ app.get('/stop', (req, res) => {
   res.redirect('/');
 });
 
-// УЛУЧШЕНИЕ 5: ЭНДПОИНТ ДЛЯ ЭКСТРЕННОГО РЕКОННЕКТА
 app.get('/reconnect', (req, res) => {
-  logToWeb('🌐 Веб-интерфейс: Вызвано экстренное переподключение бота.');
+  logToWeb('🌐 Веб-интерфейс: Вызвано экстренное переподключение.');
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
   destroyBot('Экстренный ручной перезапуск');
   initBot();
   res.redirect('/');
 });
 
-// УЛУЧШЕНИЕ 2: ЭНДПОИНТ ОБНОВЛЕНИЯ НАСТРОЕК
 app.post('/update-config', (req, res) => {
   CONFIG.host = req.body.host.trim();
   CONFIG.port = parseInt(req.body.port) || 25565;
   CONFIG.username = req.body.username.trim();
-  
-  logToWeb(`🌐 Веб-интерфейс: Конфигурация обновлена. Новый порт: ${CONFIG.port}. Перезапуск...`);
-  
+  logToWeb(`🌐 Веб-интерфейс: Настройки обновлены. Перезапуск...`);
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
-  destroyBot('Изменение конфигурации подключения');
+  destroyBot('Изменение конфигурации');
   initBot();
-  
   res.redirect('/');
 });
 
-// УЛУЧШЕНИЕ 6: ЭНДПОИНТ ДЛЯ СТРИМИНГА ЛОГОВ В БРАУЗЕР
 app.get('/stream-logs', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
-
   logClients.add(res);
-
-  req.on('close', () => {
-    logClients.delete(res);
-  });
+  req.on('close', () => { logClients.delete(res); });
 });
 
 app.listen(webPort, () => {
@@ -192,150 +187,125 @@ function initBot() {
     port: CONFIG.port,
     username: CONFIG.username,
     version: CONFIG.version,
-    checkTimeoutInterval: 15000 // Кикаем зависший сокет через 15 секунд молчания сервера
+    checkTimeoutInterval: 15000
   });
 
-  bot.loadPlugin(pathfinder);
-
   bot.on('spawn', () => {
-    logToWeb(`🤖 Бот [${bot.username}] зашел на server.`);
+    logToWeb(`🤖 Бот [${bot.username}] успешно зашел на сервер.`);
     if (bot.physicsEnabled === false) bot.physicsEnabled = true;
+    reconnectAttempts = 0;
+    startStatsReporter();
     startLoop();
   });
 
   bot.on('error', (err) => {
-    logToWeb(`⚠️ Ошибка протокола подключения: ${err.message}`);
+    logToWeb(`⚠️ Ошибка подключения: ${err.message}`);
   });
 
   bot.on('end', (reason) => {
-    logToWeb(`🔌 Соединение разорвано (${reason}).`);
+    logToWeb(`🔌 Соединение закрыто: ${reason}`);
     destroyBot(reason);
     
-    // Бесконечный жесткий реконнект каждые 30-40 секунд при киках или выключении Атерноса
     if (isRunning) {
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      logToWeb('⏳ Повторная попытка входа через 40 секунд...');
-      reconnectTimeout = setTimeout(initBot, 40000);
+      
+      reconnectAttempts++;
+      const baseDelay = 40000;
+      const delay = Math.min(baseDelay * Math.pow(1.8, reconnectAttempts - 1), 900000);
+      
+      logToWeb(`⏳ Повторная попытка входа через ${Math.round(delay / 1000)} сек. (Попытка #${reconnectAttempts})`);
+      reconnectTimeout = setTimeout(initBot, delay);
     }
   });
 }
 
 function destroyBot(reason) {
+  if (statsInterval) {
+    clearInterval(statsInterval);
+    statsInterval = null;
+  }
   if (bot) {
     try {
-      bot.physicsEnabled = false; // Отключаем тики физики, чтобы предотвратить Timeout 5250ms
-      bot.pathfinder.stop();      // Принудительно гасим pathfinder
+      bot.physicsEnabled = false;
       bot.quit(reason);
     } catch (e) {}
     bot = null;
   }
 }
 
-// Главный цикл жизнедеятельности
+// ГЛАВНЫЙ ЦИКЛ (Скрещенный!)
 async function startLoop() {
   while (isRunning && bot && bot.entity) {
     try {
-      let actionType = Math.random();
+      const decision = Math.random();
 
-      if (actionType < 0.50) {
-        await mineBlockWithTimeout('stone', 12000); // 12 секунд лимит на добычу камня
-      } else if (actionType < 0.85) {
-        await mineBlockWithTimeout('log', 12000);  // 12 секунд лимит на дерево
+      // === 1. РЕШЕНИЕ: Какое действие выполняем? ===
+
+      if (decision < 0.70) {
+        // === 70% Шанс: Добыча ресурсов (Твоя 100% рабочая логика) ===
+        const block = bot.findBlock({
+          matching: (b) => b.name === 'stone' || b.name === 'oak_log',
+          maxDistance: 6 // Идеальная дистанция для коробки
+        });
+
+        if (block) {
+          // Легкая задержка реакции «человека» перед ударом (150-300мс)
+          const humanReaction = 150 + Math.floor(Math.random() * 150);
+          await new Promise(r => setTimeout(r, humanReaction));
+
+          if (bot && bot.entity) {
+            // Наводим взгляд на блок и копаем его напрямую без pathfinder
+            await bot.lookAt(block.position.offset(0.5, 0.5, 0.5), true);
+            await bot.dig(block);
+
+            // Бесшумно записываем в статистику вместо спама в чат
+            if (block.name === 'stone') stats.stone++;
+            if (block.name === 'oak_log') stats.wood++;
+          }
+        }
+
+      } else if (decision < 0.85) {
+        // === 15% Шанс: Осмотр окружения ===
+        const yaw = (Math.random() * 360 - 180) * (Math.PI / 180);
+        const pitch = (Math.random() * 40 - 20) * (Math.PI / 180);
+        await bot.look(yaw, pitch, true);
+        
+        const stareTime = 800 + Math.floor(Math.random() * 1200);
+        await new Promise(r => setTimeout(r, stareTime));
+
+      } else if (decision < 0.96) {
+        // === 11% Шанс: Разминка (Прыжки и приседания) ===
+        if (Math.random() < 0.5) {
+          bot.setControlState('jump', true);
+          await new Promise(r => setTimeout(r, 200));
+          bot.setControlState('jump', false);
+          stats.jumps++;
+        } else {
+          bot.setControlState('sneak', true);
+          await new Promise(r => setTimeout(r, 600));
+          bot.setControlState('sneak', false);
+          stats.sneaks++;
+        }
       } else {
-        // Разминка
-        bot.setControlState('jump', true);
-        await new Promise(r => setTimeout(r, 200));
-        bot.setControlState('jump', false);
+        // === 4% Шанс: Глубокий AFK ("ушел за чаем") ===
+        const afkDelay = 8000 + Math.floor(Math.random() * 8000); // От 8 до 16 секунд тишины
+        stats.idleSecs += Math.round(afkDelay / 1000);
+        await new Promise(r => setTimeout(r, afkDelay));
       }
-      
-      // Пауза между циклами
-      await new Promise(r => setTimeout(r, 3000));
+
+      // === 2. ДЖИТТЕР ПАУЗЫ (Микро-затуп между действиями) ===
+      // Пауза от 1 до 2.5 секунд, чтобы бот не молотил без перерыва
+      const loopDelay = 1000 + Math.floor(Math.random() * 1500);
+      await new Promise(r => setTimeout(r, loopDelay));
+
     } catch (err) {
-      logToWeb(`🤖 Защита: Ошибка в главном цикле (сброшено): ${err.message}`);
-      if (bot) bot.pathfinder.stop();
-      await new Promise(r => setTimeout(r, 4000));
+      // Молча проглатываем ошибки копания, если блок исчез перед лицом, чтобы бот шел дальше
+      await new Promise(r => setTimeout(r, 1000));
     }
   }
 }
 
-// Защищенная добыча с жестким тайм-аутом, спасающая от багов pathfinder
-function mineBlockWithTimeout(blockName, timeoutMs) {
-  return new Promise((resolve) => {
-    let isDone = false;
-
-    // Внутренний таймер, который прервет копание, если pathfinder зависнет на слишком длинном маршруте
-    const timer = setTimeout(() => {
-      if (!isDone) {
-        isDone = true;
-        logToWeb(`⏰ Превышен лимит (${timeoutMs}мс) на добычу ${blockName}. Защитный сброс пути.`);
-        if (bot) {
-          bot.pathfinder.stop();
-          bot.physicsEnabled = false; // Предотвращаем ошибку тиков при застревании
-          setTimeout(() => { if (bot) bot.physicsEnabled = true; }, 500);
-        }
-        resolve();
-      }
-    }, timeoutMs);
-
-    mineBlock(blockName).then(() => {
-      if (!isDone) {
-        isDone = true;
-        clearTimeout(timer);
-        resolve();
-      }
-    }).catch((err) => {
-      if (!isDone) {
-        isDone = true;
-        clearTimeout(timer);
-        logToWeb(`🤖 Перехвачена ошибка pathfinder: ${err.message}`);
-        resolve();
-      }
-    });
-  });
-}
-
-async function mineBlock(blockName) {
-  if (!bot || !bot.entity) return;
-
-  const block = bot.findBlock({
-    matching: (b) => b.name.includes(blockName) || b.name.includes('cobblestone') || b.name.includes('dirt'),
-    maxDistance: 10 // Уменьшили радиус до 10, чтобы избежать слишком длинных путей (too long path)
-  });
-  
-  if (!block) return;
-
-  const mcData = require('minecraft-data')(bot.version);
-  const movements = new Movements(bot, mcData);
-  
-  // Отключаем сложные вычисления паркура, чтобы pathfinder не зависал
-  movements.canDig = false; 
-  movements.allow1x1Walk = false;
-  
-  bot.pathfinder.setMovements(movements);
-  
-  // Направляемся к блоку
-  await bot.pathfinder.goto(new GoalLookAtBlock(block.position, bot.world));
-  
-  if (!bot || !bot.entity) return;
-
-  // Экипируем лучший инструмент
-  const tool = bot.pathfinder.bestHarvestTool(block);
-  if (tool) await bot.equip(tool, 'hand');
-  
-  // Копаем
-  await bot.dig(block);
-}
-
-// Глобальный перехват некритичных ошибок Node.js
-process.on('uncaughtException', (err) => {
-  logToWeb(`🛡️ Перехвачена системная ошибка: ${err.message}`);
-  if (err.message.includes('physics') || err.message.includes('ticks') || err.message.includes('pathfinder')) {
-    // Если посыпались ошибки физики/путей — мягко ребутаем бота без падения самого сервера
-    destroyBot('Ошибка физики/путей');
-    setTimeout(initBot, 10000);
-  }
-});
-
 // Первый запуск
 initBot();
-        
+
+                                                          
